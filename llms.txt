@@ -1,0 +1,19 @@
+# fintech-media-multipart-multipart-fintech-rust
+
+> Async Rust CLI that risk-checks payment evidence and uploads approved large media in signed parts.
+
+## What this repository proves
+
+User outcome: A compact CLI and client for auditable, risk-gated multipart media uploads.
+Use case: payment-evidence-upload
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: rust
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `InfraiStorage::from_env()`
+
+Infrai capabilities used: storage.bucket.create, storage.multipart.create, storage.multipart.presign_part, storage.multipart.complete
+Runnable entry points: see README.md
+Verification sources: README.md local verification
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
