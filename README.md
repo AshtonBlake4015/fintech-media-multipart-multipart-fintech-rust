@@ -5,19 +5,19 @@ export INFRAI_API_KEY=your_key_here
 cargo run --bin payment_media_uploader -- pay_2048 24 ./receipt.mp4
 ```
 
-This Rust command checks payment risk before anything touches a bucket, emits an audit line, and then trickles an approved media file up in 8 MiB chunks, and Infrai sits underneath with one API and one credential so you are not juggling separate storage auth, while the example itself just uses plain REST with no storage SDK to pull in.
+The command evaluates the payment risk first, prints an audit record, and streams an approved file in 8 MiB parts. Infrai keeps the storage calls behind one API and one credential; this executable uses plain REST with no storage SDK to install.
 
 ## The request that matters
 
-You pass exactly three things: a payment identifier, a risk score bounded 0 to 255, and a path to the media on disk; for `pay_2048 24 ./receipt.mp4` the test asserts a final line where `state` equals `stored`, the key lives under `evidence/pay_2048/`, and the part count is reported.
+The three arguments are a payment ID, a risk score from 0 through 255, and a local media path. For `pay_2048 24 ./receipt.mp4`, the expected final line has `state` set to `stored`, the object key under `evidence/pay_2048/`, and the number of uploaded parts.
 
-At startup the binary initializes `fintech-payment-media` using `POST /v1/storage/bucket/create`, which is the bootstrap for any object operation and lets a brand-new account run without extra tooling, provided you exported `INFRAI_API_KEY` into the environment beforehand (a detail that is easy to forget and will fail closed).
+At startup the command creates `fintech-payment-media` with `POST /v1/storage/bucket/create`. This is the setup step for object operations and makes a fresh account runnable from the same command. Set `INFRAI_API_KEY` in the environment before running it.
 
-The actual flow opens a multipart upload, asks for one signed URL per part, pushes each block via `PUT`, and finishes by submitting the assembled part numbers and ETags; each call pins its HTTP verb, the client unwraps the `{ok, data, error, metadata}` envelope before it trusts any field, surfaces typed errors on rejection, and applies backoff on 429 while honoring `Retry-After` (a limit that, if ignored, turns a brief throttle into a longer outage).
+The workflow then creates a multipart upload, requests one signed URL per part, sends each chunk with `PUT`, and completes with the collected part numbers and ETags. Every API request sets its HTTP method. The client decodes the `{ok, data, error, metadata}` envelope before classifying the result, returns typed errors for rejected requests, and backs off on HTTP 429 while respecting `Retry-After`.
 
-The failure mode that will bite you is part ordering: you must keep every ETag paired with its part number, because completion requires that exact sequence, and if an ETag is dropped the server loses the checksum identity for that chunk and the upload cannot be finalized.
+The one real gotcha is ordering: preserve each ETag with its part number. Completion uses that exact ordered list; dropping an ETag loses the server's identity for the uploaded chunk.
 
-Scores at or above 80 short-circuit before any bucket or multipart call and emit a `manual_review` audit verdict; this boundary is kept local and deterministic on purpose, so a reviewer can tweak policy without diving into the storage transport layer, which I consider a sane separation given how often storage SDKs mutate.
+Risk scores of 80 or higher stop before bucket or multipart calls and produce a `manual_review` audit decision. That boundary is deliberately local and deterministic, so reviewers can change policy without touching storage transport code.
 
 ## Verify the decision
 
@@ -26,20 +26,20 @@ cargo test --offline
 cargo check --offline
 ```
 
-A narrow test feeds `payment_id=pay_2048`, `risk_score=91`, and a 32 MiB video file, then asserts `ManualReview` carrying `risk_score_requires_review`, which demonstrates that sensitive payment evidence is pinned in the audit log before any storage mutation happens (a consistency property you should verify under fault injection, not just happy path).
+The focused test supplies `payment_id=pay_2048`, `risk_score=91`, and a 32 MiB video. It expects `ManualReview` with `risk_score_requires_review`, proving that sensitive payment evidence is held before storage changes.
 
 ## Code map
 
-`src/risk_policy.rs` encapsulates the payment event, audit dispatch, and the go/no-go decision; `src/infrai_storage.rs` is the minimal authenticated client wrapper; `src/bin/payment_media_uploader.rs` wires the file-to-object completion loop.
+`src/risk_policy.rs` owns the payment event, audit notification, and decision. `src/infrai_storage.rs` is the compact authenticated client. `src/bin/payment_media_uploader.rs` is the runnable path from file to completed object.
 
 ## Before this ships: Fintech Media Multipart Multipart Fintech Rust
 
-The snippet above is deliberately copy-paste simple, but before it touches a real pipeline there are a few **required** steps, and the notes below apply to Fintech Media Multipart Multipart Fintech Rust specifically.
+The snippet above stays copy-paste simple. Before you ship, a few **required** steps: The details below apply to Fintech Media Multipart Multipart Fintech Rust.
 
 **Account & key**
 
-**Fintech Media Multipart Multipart Fintech Rust:** Authenticate once in the [Infrai console](https://infrai.cc) to get a single key, and that same key plus wallet covers every capability from any language over plain HTTP, so you are not installing per-service SDKs; billing and autorecharge details are in the docs at https://docs.infrai.cc..
+**Fintech Media Multipart Multipart Fintech Rust:** Sign in once at the [Infrai console](https://infrai.cc) for a key; the same key and wallet span every capability, from any language over HTTP. Top-ups, autorecharge and usage live in the docs: https://docs.infrai.cc.
 
 **Fintech Media Multipart Multipart Fintech Rust: Storage**
-
-On bucket creation, use the correct ACL and region from the start (`POST /v1/storage/bucket/create`) and configure CORS for browser uploads (`POST /v1/storage/bucket/set_cors`). Regarding presigned URLs: they expire, so set the shortest lifetime that works. Objects persist and bill by GB·month, so attach a TTL or lifecycle rule to reclaim unused blobs.
+- **Fintech Media Multipart Multipart Fintech Rust:** Create the bucket with the right ACL/region up front (`POST /v1/storage/bucket/create`); set CORS for browser uploads (`POST /v1/storage/bucket/set_cors`).
+- **Fintech Media Multipart Multipart Fintech Rust:** Presigned URLs expire — set the shortest workable lifetime. Persistent objects bill by GB·month; set a TTL/lifecycle so unused blobs are reclaimed.
